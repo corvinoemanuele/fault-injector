@@ -1,0 +1,38 @@
+# Dataset
+data/
+!data/create_golden_labels.py
+DATA_ANALYZER_PARALLEL/data/
+
+# Weights and models
+models/CIFAR10/pretrained/
+models/CIFAR100/pretrained/
+models/MNIST/
+models/MNIST_TRAIN/
+models/FMNIST/
+models/GTSRB/pretrained/
+training/trained_models/
+
+# Output experiments
+output/
+results/
+log/
+training/tensorboard/
+
+# Not useful folders
+OPT_FI_EXP/
+misc/
+
+# Build artifacts
+build/
+DATA_ANALYZER_PARALLEL/build/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Editor
+.vscode/
+.env
