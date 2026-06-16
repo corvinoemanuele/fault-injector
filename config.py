@@ -13,6 +13,7 @@ SEED = 51195
 MAX_FAULTS_TO_INJECT = 20000
 BATCH_SIZE = 64
 DEVICE = 'cuda'
+DELETE_FAULTY_OUTPUT = True #if True it delete the faulty output folder after data analyzer to save space on the disk
 
 # ===================== OTTIMIZZAZIONI RETE =====================
 # Raramente usati — di solito il modello pruned/TMR viene caricato direttamente tramite NETWORK_NAME

@@ -157,7 +157,7 @@ from datetime import datetime
 
 from config import (
     NETWORK_NAME, DATASET, BATCH_SIZE, SEED, DATASET_ROOT, RESULTS_ROOT,
-    SEED_IMAGENET, FAULT_MODEL
+    SEED_IMAGENET, FAULT_MODEL, DELETE_FAULTY_OUTPUT
 )
 
 train_split = 1
@@ -200,5 +200,9 @@ else:
 os.makedirs(out_dir, exist_ok=True)
 
 analyze_FI_output(test_loader, BATCH_SIZE, clean_output_path, faulty_output_path, out_dir, WRITE_IMAGES_RESPONSE)
+
+if DELETE_FAULTY_OUTPUT and os.path.isdir(faulty_output_path):
+    shutil.rmtree(faulty_output_path)
+    print(f'Deleted {faulty_output_path}')
 
 
