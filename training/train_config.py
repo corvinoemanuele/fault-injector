@@ -18,8 +18,8 @@ STEP_LR = 10          # ogni quante epoche scala il LR
 GAMMA = 0.90            # fattore moltiplicativo: LR = LR * GAMMA
 
 #  BATCH SIZE 
-USE_BATCH_SCHEDULER = False   # True → batch size dinamico, False → fisso
-BATCH_SIZE = 64
+USE_BATCH_SCHEDULER = True   # True → batch size dinamico, False → fisso
+BATCH_SIZE = 256
 MAX_BATCH_SIZE = 256
 MIN_BATCH_SIZE = 32
 STEP_BATCH_SIZE = 10       # ogni quante epoche cambia

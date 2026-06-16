@@ -1,6 +1,6 @@
 # ===================== RETE E DATASET =====================
-NETWORK_NAME = 'VGG_static_ber_1e-6'
-DATASET = 'CIFAR10'
+NETWORK_NAME = 'VGG13_BN_SGD_EP_200_LR_04'
+DATASET = 'CIFAR100'
 
 # ===================== PATH =====================
 ROOT = '/home/nicolo_b/Desktop/PhD/RELIABLE_NAS/NOTEBOOK/FAULT_INJECTOR/VITTFI'
