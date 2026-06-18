@@ -1,5 +1,5 @@
 # ===================== RETE E DATASET =====================
-NETWORK_NAME = 'VGG13_BN_SGD_EP_200_LR_04'
+NETWORK_NAME = 'VGG13_BN_SGD_EP_200_LR_01'
 DATASET = 'CIFAR100'
 
 # ===================== PATH =====================
@@ -11,7 +11,7 @@ RESULTS_ROOT = f'{ROOT}/results'
 FAULT_MODEL = 'stuck-at_params'
 SEED = 51195
 MAX_FAULTS_TO_INJECT = 20000
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 DEVICE = 'cuda'
 DELETE_FAULTY_OUTPUT = True #if True it delete the faulty output folder after data analyzer to save space on the disk
 
