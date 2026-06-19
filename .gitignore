@@ -18,6 +18,11 @@ results/
 log/
 training/tensorboard/
 
+# Utility notebooks
+training/list_experiments.ipynb
+training/fine_tuning.ipynb
+training/metric_extractor.ipynb
+
 # Not useful folders
 OPT_FI_EXP/
 misc/
