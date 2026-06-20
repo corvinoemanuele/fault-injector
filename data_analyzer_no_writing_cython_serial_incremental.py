@@ -147,6 +147,17 @@ def analyze_FI_output(loader, batch_size, clean_output_path, faulty_output_path,
             print(f'\nTOP-5 clean accuracy: {100*clean_output_match_counter_sdc5 / (dataset_size*(n_faults+1))}')
             print(f'TOP-5 faulty accuracy: {100*faulty_output_match_counter_sdc5 / (dataset_size*(n_faults+1))}')
 
+import sys
+import os
+
+# Add build directory to path for process_batch_serial
+build_dir = os.path.join(os.path.dirname(__file__), 'build')
+for py_version in ['lib.linux-x86_64-cpython-310', 'lib.linux-x86_64-cpython-39']:
+    full_path = os.path.join(build_dir, py_version)
+    if os.path.exists(full_path) and full_path not in sys.path:
+        sys.path.insert(0, full_path)
+        break
+
 #import cython_process_batch
 #from cython_process_batch import process_batch_serial
 import process_batch_serial

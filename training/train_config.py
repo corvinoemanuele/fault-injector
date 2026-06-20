@@ -9,7 +9,7 @@ DATASET = 'CIFAR100'
 
 #  OPTIMIZER 
 OPTIMIZER = 'adam'        # 'adam' o 'sgd'
-LR = 0.0005
+LR = 0.0015
 WEIGHT_DECAY = 5e-4
 
 #  SCHEDULER 
