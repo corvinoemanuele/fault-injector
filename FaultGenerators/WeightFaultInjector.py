@@ -14,6 +14,7 @@ class WeightFaultInjector:
 
         self.faulty_value = None
         self.golden_value = None
+        self.golden_stack = []
 
 
     def __inject_fault(self, layer_name, tensor_index, bit, value=None):
@@ -37,21 +38,28 @@ class WeightFaultInjector:
 
         self.network.state_dict()[self.layer_name][self.tensor_index] = faulty_value
 
+    def __float32_bit_flip_value(self, value: float, bit: int) -> float:
+        """
+        Pure version of the bit-flip operation: takes value and bit explicitly
+        instead of reading self.golden_value/self.bit. Used by both the
+        single-fault (SFI) and multi-fault (BER) injection paths.
+        :param value: the golden value to flip
+        :param bit: the bit position to flip (0-31)
+        :return: the value with the specified bit flipped
+        """
+        float_list = []
+        a = struct.pack('!f', value)
+        b = struct.pack('!I', int(2. ** bit))
+        for ba, bb in zip(a, b):
+            float_list.append(ba ^ bb)
+        return struct.unpack('!f', bytes(float_list))[0]
+
     def __float32_bit_flip(self):
         """
         Inject a bit-flip on a data represented as float32
         :return: The value of the bit-flip on the golden value
         """
-
-        float_list = []
-        a = struct.pack('!f', self.golden_value)
-        b = struct.pack('!I', int(2. ** self.bit))
-        for ba, bb in zip(a, b):
-            float_list.append(ba ^ bb)
-
-        faulted_value = struct.unpack('!f', bytes(float_list))[0]
-
-        return faulted_value
+        return self.__float32_bit_flip_value(self.golden_value, self.bit)
 
     def __float32_stuck_at(self,
                            value: int):
@@ -96,6 +104,38 @@ class WeightFaultInjector:
         self.__inject_fault(layer_name=layer_name,
                             tensor_index=tensor_index,
                             bit=bit)
+    
+    def inject_multi_bit_flip(self, faults: list) -> None:
+        """
+        Inject multiple simultaneous bit-flips (used for BER campaigns).
+        Saves a golden snapshot of all affected weights before injecting,
+        so they can be restored together with restore_golden_multi().
+        :param faults: list of WeightFault objects to inject simultaneously
+        """
+        snapshot = []
+        for fault in faults:
+            layer_key = f'{fault.layer_name}.weight'
+            golden_value = float(self.network.state_dict()[layer_key][fault.tensor_index])
+            snapshot.append((layer_key, fault.tensor_index, golden_value))
+
+            faulty_value = self.__float32_bit_flip_value(golden_value, fault.bit)
+            self.network.state_dict()[layer_key][fault.tensor_index] = faulty_value
+
+        self.golden_stack.append(snapshot)
+
+    def restore_golden_multi(self) -> None:
+        """
+        Restore the weights modified by the most recent inject_multi_bit_flip call.
+        Restores in reverse order to correctly handle collisions
+        (multiple faults landing on the same weight in the same trial).
+        """
+        if len(self.golden_stack) == 0:
+            print('CRITICAL ERROR: impossible to restore, no golden snapshot available')
+            quit()
+
+        snapshot = self.golden_stack.pop()
+        for layer_key, tensor_index, golden_value in reversed(snapshot):
+            self.network.state_dict()[layer_key][tensor_index] = golden_value
 
     def inject_stuck_at(self,
                         layer_name: str,
