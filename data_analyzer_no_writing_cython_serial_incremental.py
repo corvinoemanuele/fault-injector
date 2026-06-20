@@ -152,11 +152,14 @@ import os
 
 # Add build directory to path for process_batch_serial
 build_dir = os.path.join(os.path.dirname(__file__), 'build')
-for py_version in ['lib.linux-x86_64-cpython-310', 'lib.linux-x86_64-cpython-39']:
-    full_path = os.path.join(build_dir, py_version)
-    if os.path.exists(full_path) and full_path not in sys.path:
-        sys.path.insert(0, full_path)
-        break
+# Try to find any available Python version build
+if os.path.exists(build_dir):
+    for lib_dir in os.listdir(build_dir):
+        if lib_dir.startswith('lib.linux-x86_64'):
+            full_path = os.path.join(build_dir, lib_dir)
+            if os.path.exists(full_path) and full_path not in sys.path:
+                sys.path.insert(0, full_path)
+                break
 
 #import cython_process_batch
 #from cython_process_batch import process_batch_serial
