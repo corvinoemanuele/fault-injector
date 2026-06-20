@@ -4,7 +4,7 @@ ROOT = '/home/nicolo_b/Desktop/PhD/RELIABLE_NAS/NOTEBOOK/FAULT_INJECTOR/VITTFI'
 sys.path.insert(0, ROOT)
 
 #  RETE E DATASET 
-NETWORK_NAME = 'SHUFFLENETV2_X1_0'
+NETWORK_NAME = 'MOBILENETV2_X1_0'
 DATASET = 'CIFAR100'
 
 #  OPTIMIZER 
@@ -14,12 +14,12 @@ WEIGHT_DECAY = 5e-4
 
 #  SCHEDULER 
 SCHEDULER = 'stepLR'      
-STEP_LR = 10          # ogni quante epoche scala il LR
-GAMMA = 0.90            # fattore moltiplicativo: LR = LR * GAMMA
+STEP_LR = 5          # ogni quante epoche scala il LR
+GAMMA = 0.95            # fattore moltiplicativo: LR = LR * GAMMA
 
 #  BATCH SIZE 
 USE_BATCH_SCHEDULER = True   # True → batch size dinamico, False → fisso
-BATCH_SIZE = 256
+BATCH_SIZE = 64
 MAX_BATCH_SIZE = 256
 MIN_BATCH_SIZE = 32
 STEP_BATCH_SIZE = 10       # ogni quante epoche cambia

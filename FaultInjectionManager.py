@@ -256,7 +256,7 @@ class FaultInjectionManager:
                     if fault_model == 'byzantine_neuron':
                         injected_layer = self.__inject_fault_on_neuron(fault=fault)
                     elif fault_model == 'stuck-at_params':
-                        self.__inject_fault_on_weight(fault, fault_mode='stuck-at')
+                        self.__inject_fault_on_weight(fault, fault_mode='bit-flip')
                     else:
                         raise ValueError(f'Invalid fault model {fault_model}')
 
@@ -427,12 +427,11 @@ class FaultInjectionManager:
 
     def __inject_fault_on_weight(self,
                                  fault,
-                                 fault_mode='stuck-at') -> None:
+                                 fault_mode='bit-flip') -> None:
         """
         Inject a fault in one of the weight of the network
         :param fault: The fault to inject
-        :param fault_mode: Default 'stuck-at'. One of either 'stuck-at' or 'bit-flip'. Which kind of fault model to
-        employ
+        :param fault_mode: Default 'bit-flip'. One of either 'stuck-at' or 'bit-flip'. Which kind of fault model to employ
         """
 
         if fault_mode == 'stuck-at':
@@ -443,7 +442,7 @@ class FaultInjectionManager:
         elif fault_mode == 'bit-flip':
             self.weight_fault_injector.inject_bit_flip(layer_name=f'{fault.layer_name}.weight',
                                                        tensor_index=fault.tensor_index,
-                                                       bit=fault.bit,)
+                                                       bit=fault.bit)
         else:
             print('FaultInjectionManager: Invalid fault mode')
             quit()

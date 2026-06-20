@@ -33,7 +33,7 @@ class FaultListGenerator:
 
         self.device = device
 
-        # ---------------------------- momodifiche fate da me (ATTENZIONE) ----------------------------
+        # ---------------------------- modifiche fate da me (ATTENZIONE) ----------------------------
         # self.feature_maps_layer_names = [name.replace('.weight', '') for name, module in self.network.named_modules()
         #                                  if isinstance(module, module_classes = torch.nn.Conv2d)]
         
@@ -83,8 +83,6 @@ class FaultListGenerator:
             return p * (1-p) * t ** 2 / e ** 2
         else:
             return N / (1 + e ** 2 * (N - 1) / (t ** 2 * p * (1 - p)))
-
-
 
 
     def __replace_injectable_output_modules(self,

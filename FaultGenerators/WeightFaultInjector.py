@@ -1,5 +1,6 @@
 import struct
-
+# struct converts between Python floats and their raw 32-bit IEEE 754
+# byte representation, needed to manipulate individual bits via XOR/AND/OR
 
 class WeightFaultInjector:
 
@@ -11,14 +12,19 @@ class WeightFaultInjector:
         self.tensor_index = None
         self.bit = None
 
+        self.faulty_value = None
         self.golden_value = None
 
 
     def __inject_fault(self, layer_name, tensor_index, bit, value=None):
+        ''' 
+        Saves the coordinate of the fault (to restore it later)
+        First corrupt the weight and then writes the corrupted value in the model's tensor
+        '''
+    
         self.layer_name = layer_name
         self.tensor_index = tensor_index
         self.bit = bit
-
         self.golden_value = float(self.network.state_dict()[self.layer_name][self.tensor_index])
 
         # If the value is not set, then we are doing a bit-flip
@@ -36,6 +42,7 @@ class WeightFaultInjector:
         Inject a bit-flip on a data represented as float32
         :return: The value of the bit-flip on the golden value
         """
+
         float_list = []
         a = struct.pack('!f', self.golden_value)
         b = struct.pack('!I', int(2. ** self.bit))
