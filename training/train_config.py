@@ -9,13 +9,13 @@ DATASET = 'CIFAR100'
 
 #  OPTIMIZER 
 OPTIMIZER = 'adam'        # 'adam' o 'sgd'
-LR = 0.0015
+LR = 0.0005
 WEIGHT_DECAY = 5e-4
 
 #  SCHEDULER 
 SCHEDULER = 'stepLR'      
-STEP_LR = 5          # ogni quante epoche scala il LR
-GAMMA = 0.95            # fattore moltiplicativo: LR = LR * GAMMA
+STEP_LR = 10          # ogni quante epoche scala il LR
+GAMMA = 0.80           # fattore moltiplicativo: LR = LR * GAMMA
 
 #  BATCH SIZE 
 USE_BATCH_SCHEDULER = True   # True → batch size dinamico, False → fisso

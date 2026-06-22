@@ -7,7 +7,6 @@ echo "=== Inizio training: $(date) ==="
 
 python3 train.py
 python3 train.py --lr 0.001
-python3 train.py --lr 0.0015
 python3 train.py --lr 0.002
 
 
