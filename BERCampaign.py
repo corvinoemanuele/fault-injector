@@ -143,4 +143,9 @@ class BERCampaign:
         
         return [self.global_index_to_fault(int(g)) for g in idx]
 
+    #def _plain_accuracy():
+        #placeholder, next thing to do
+
+
+
                  
