@@ -143,8 +143,35 @@ class BERCampaign:
         
         return [self.global_index_to_fault(int(g)) for g in idx]
 
-    #def _plain_accuracy():
-        #placeholder, next thing to do
+    def _plain_accuracy(self) -> float:
+        """
+        Evaluate the current state of the network on the full test set.
+        Used both for the golden baseline and for each faulty trial.
+
+        nan_to_num on the logits guards against NaN/Inf values that can
+        appear when a bit-flip hits a high exponent bit of a weight,
+        producing a catastrophically large or undefined value.
+
+        :return: accuracy in [0, 1]
+        """
+        self.network.eval()
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for images, labels in self.loader:
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                logits = self.network(images)
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
+
+                predictions = logits.argmax(dim=1)
+                correct += (predictions == labels).sum().item()
+                total += labels.size(0)
+
+        return correct / total
+
 
 
 
