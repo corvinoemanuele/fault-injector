@@ -11,12 +11,12 @@ RESULTS_ROOT = f'{ROOT}/results'
 FAULT_MODEL = 'stuck-at_params'
 SEED = 51195
 MAX_FAULTS_TO_INJECT = 20000
-BATCH_SIZE = 256
+BATCH_SIZE = 1024
 DEVICE = 'cuda'
 DELETE_FAULTY_OUTPUT = True #if True it delete the faulty output folder after data analyzer to save space on the disk
 
 # ===================== BER CAMPAIGN =====================
-P_VALUES     = [1e-8, 5e-8, 1e-7, 5e-7, 1e-6]
+P_VALUES     = [1e-8, 5e-8, 1e-7, 5e-7]
 PILOT_TRIALS = 20
 MAX_TRIALS   = 100
 PRECISION_E  = 0.01

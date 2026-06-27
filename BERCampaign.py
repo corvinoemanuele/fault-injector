@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 from torch.nn import Module
@@ -33,6 +34,9 @@ class BERCampaign:
                  injector: WeightFaultInjector,
                  device: torch.device,
                  injection_levels: list,
+                 network_name: str,
+                 dataset_name: str,
+                 root: str = '.',
                  pilot_trials: int=100, max_trials: int=2000,
                  precision_e: float=0.01, confidence_t: float=2.576,
                  sampling_mode: str = 'constant',
@@ -59,6 +63,9 @@ class BERCampaign:
         self.loader = loader
         self.injector = injector
         self.device = device
+        self.network_name = network_name
+        self.dataset_name = dataset_name
+        self.root = root
 
         # Campaign parameters
         self.injection_levels = injection_levels
@@ -167,6 +174,124 @@ class BERCampaign:
 
         return [self._global_index_to_fault(int(g)) for g in idx]
 
+
+    def _compute_golden_outputs(self):
+        """
+        Run a forward pass on the clean network over the full test set and
+        save both the golden logits (full output vector per image) and the
+        golden top-1 predictions.
+
+        The full logits are needed because the SFI 'masked' definition
+        compares the entire output vector, not just the predicted class.
+
+        Outputs are saved under output/golden_output_ber/ and reused on
+        subsequent runs.
+
+        :return: tuple (golden_logits, golden_predictions)
+                - golden_logits: 2D tensor (n_images, n_classes)
+                - golden_predictions: 1D tensor (n_images,)
+        """
+        golden_dir = os.path.join(self.root, 'output', 'golden_output_ber', self.dataset_name, self.network_name)
+        os.makedirs(golden_dir, exist_ok=True)
+        golden_path = os.path.join(
+            golden_dir, f'{self.network_name}_{self.dataset_name}_golden.pt'
+        )
+
+        if os.path.exists(golden_path):
+            print(f'Loading golden outputs from {golden_path}')
+            data = torch.load(golden_path, map_location=self.device)
+            return data['logits'], data['predictions']
+
+        print('Computing golden outputs...')
+        self.network.eval()
+        golden_logits = []
+
+        with torch.no_grad():
+            for images, _ in self.loader:
+                images = images.to(self.device)
+                logits = self.network(images)
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
+                golden_logits.append(logits.cpu())
+
+        golden_logits = torch.cat(golden_logits)
+        golden_predictions = golden_logits.argmax(dim=1)
+
+        torch.save(
+            {'logits': golden_logits, 'predictions': golden_predictions},
+            golden_path
+        )
+        print(f'Golden outputs saved to {golden_path}')
+
+        return golden_logits, golden_predictions
+
+
+    def _evaluate_trial(self, golden_predictions: torch.Tensor, golden_logits: torch.Tensor) -> dict:
+        """
+        Evaluate the currently faulted network over the full test set and
+        classify each image against the clean (golden) output, following the
+        same definitions used by the SFI data analyzer (analyze_a_fault):
+
+        - masked:       faulty output vector identical to clean output vector
+                        (no change at all in the logits)
+        - not_critical: output changed, but faulty top-1 == clean top-1
+        - critical:     faulty top-1 != clean top-1 (SDC-1)
+
+        The reference is always the CLEAN output, never the true label. The
+        true label is only used to compute clean/faulty accuracy.
+
+        :param golden_predictions: 1D tensor of clean top-1 predictions
+        :param golden_logits: 2D tensor (n_images, n_classes) of clean logits
+        :return: dict with counts and ratios.
+        """
+        self.network.eval()
+
+        n_masked = 0
+        n_not_critical = 0
+        n_critical = 0
+        faulty_correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for images, labels in self.loader:
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                logits = self.network(images)
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
+                faulty_pred = logits.argmax(dim=1)
+
+                start = total
+                end = total + labels.size(0)
+                clean_pred = golden_predictions[start:end].to(self.device)
+                clean_logits = golden_logits[start:end].to(self.device)
+
+                # masked: faulty logits identical to clean logits (all classes)
+                masked = (logits == clean_logits).all(dim=1)
+
+                # top-1 comparison vs CLEAN prediction
+                same_top1 = faulty_pred == clean_pred
+
+                n_masked += masked.sum().item()
+                # not_critical: not masked but same top-1 as clean
+                n_not_critical += (same_top1 & ~masked).sum().item()
+                # critical: top-1 changed vs clean
+                n_critical += (~same_top1).sum().item()
+
+                # accuracy vs true label
+                faulty_correct += (faulty_pred == labels).sum().item()
+                total += labels.size(0)
+
+        return {
+            'n_masked': n_masked,
+            'n_not_critical': n_not_critical,
+            'n_critical': n_critical,
+            'total': total,
+            'masking_ratio': n_masked / total,
+            'critical_ratio': n_critical / total,
+            'faulty_accuracy': faulty_correct / total,
+        }
+
+
     def _plain_accuracy(self) -> float:
         """
         Evaluate the current state of the network on the full test set.
@@ -200,45 +325,27 @@ class BERCampaign:
         """
         Execute the BER campaign over all injection levels.
 
-        For each injection_level, runs a two-stage Monte Carlo sampling:
-        1) Pilot stage: always runs pilot_trials trials to estimate sigma.
-        2) Extension stage: computes the required number of trials via
-                n = (confidence_t * sigma / precision_e) ** 2
-            then runs the additional trials needed to reach
-                n_target = min(max(n, pilot_trials), max_trials).
+        For each injection_level, runs a two-stage Monte Carlo sampling.
+        The per-trial metric used for the statistics is the masking ratio
+        (fraction of images whose output is unchanged vs the clean output),
+        following the SFI classification (masked / not_critical / critical),
+        where the reference is always the clean output, not the true label.
 
-        RNG seeding strategy: each injection_level gets its own independent
-        RNG derived from the base seed plus the level index
-        (np.random.default_rng(self.seed + i), where i is the position of
-        the level in self.injection_levels). This guarantees that results
-        for a given level are fully reproducible regardless of how many
-        trials other levels ran, and that adding or removing levels from
-        the list does not affect the others.
+        Sigma for trial sizing is computed on the masking ratio:
+            n = (confidence_t * sigma / precision_e) ** 2
+            n_target = min(max(n, pilot_trials), max_trials)
 
-        Sanity checks (warnings, not errors):
-        - effective half-width > precision_e: sigma was underestimated
-            in the pilot stage, more trials would be needed.
-        - sigma == 0 at a non-zero injection level: suspicious, may
-            indicate a bug in the injection pipeline.
-        - mean accuracy outside [0, 1]: should never happen, signals
-            a bug in _plain_accuracy.
+        RNG seeding: each injection_level uses np.random.default_rng(seed + i).
 
-        :return: self.results, a dict keyed by injection_level. Each value
-                is a dict with keys:
-                - 'sampling_mode': str
-                - 'injection_level': the level value (k or p)
-                - 'golden_accuracy': float, accuracy without faults
-                - 'mean': float, mean faulty accuracy across all trials
-                - 'std': float, std of faulty accuracy across all trials
-                - 'n_trials': int, total number of trials actually run
-                - 'n_target': int, number of trials computed from sigma
-                - 'effective_half_width': float, t*std/sqrt(n_trials)
+        :return: self.results, a dict keyed by injection_level with the mean
+                and std of masking_ratio, critical_ratio and faulty_accuracy.
         """
         from tqdm import tqdm
 
         self.results = {}
 
-        # Golden accuracy — evaluated once, shared across all levels
+        # Clean reference outputs (computed once, reused across all levels)
+        golden_logits, golden_predictions = self._compute_golden_outputs()
         golden_accuracy = self._plain_accuracy()
         print(f'Golden accuracy: {golden_accuracy:.4f}\n')
 
@@ -246,33 +353,40 @@ class BERCampaign:
             enumerate(self.injection_levels),
             total=len(self.injection_levels),
             desc='BER Campaign',
-            position=0,
         )
 
         for i, injection_level in level_bar:
-            level_bar.set_description(f'BER Campaign | level={injection_level}')
 
             rng = np.random.default_rng(self.seed + i)
+
+            masking_ratios = []
+            critical_ratios = []
+            faulty_accuracies = []
 
             # ----------------------------------------------------------------
             # Stage 1 — pilot trials
             # ----------------------------------------------------------------
-            accuracies = []
             pilot_bar = tqdm(
                 range(self.pilot_trials),
-                desc=f'  Pilot (level={injection_level})',
-                position=1,
+                desc=f'  Pilot k={injection_level}',
                 leave=False,
             )
             for _ in pilot_bar:
                 faults = self._sample_faults(injection_level, rng)
                 self.injector.inject_multi_bit_flip(faults)
-                acc = self._plain_accuracy()
+                res = self._evaluate_trial(golden_predictions, golden_logits)
                 self.injector.restore_golden_multi()
-                accuracies.append(acc)
-                pilot_bar.set_postfix(acc=f'{acc:.4f}')
 
-            sigma = float(np.std(accuracies, ddof=1))
+                masking_ratios.append(res['masking_ratio'])
+                critical_ratios.append(res['critical_ratio'])
+                faulty_accuracies.append(res['faulty_accuracy'])
+                pilot_bar.set_postfix(M=f'{res["masking_ratio"]:.4f}')
+
+            # Size the trials on the noisier of the two metrics so both
+            # masking ratio and accuracy reach precision E
+            sigma_masking = float(np.std(masking_ratios, ddof=1))
+            sigma_accuracy = float(np.std(faulty_accuracies, ddof=1))
+            sigma = max(sigma_masking, sigma_accuracy)
 
             # ----------------------------------------------------------------
             # Stage 2 — compute n_target and run extra trials if needed
@@ -288,25 +402,30 @@ class BERCampaign:
             if n_extra > 0:
                 extra_bar = tqdm(
                     range(n_extra),
-                    desc=f'  Extra  (level={injection_level})',
-                    position=1,
+                    desc=f'  Extra  k={injection_level}',
                     leave=False,
                 )
                 for _ in extra_bar:
                     faults = self._sample_faults(injection_level, rng)
                     self.injector.inject_multi_bit_flip(faults)
-                    acc = self._plain_accuracy()
+                    res = self._evaluate_trial(golden_predictions, golden_logits)
                     self.injector.restore_golden_multi()
-                    accuracies.append(acc)
-                    extra_bar.set_postfix(acc=f'{acc:.4f}')
+
+                    masking_ratios.append(res['masking_ratio'])
+                    critical_ratios.append(res['critical_ratio'])
+                    faulty_accuracies.append(res['faulty_accuracy'])
+                    extra_bar.set_postfix(M=f'{res["masking_ratio"]:.4f}')
 
             # ----------------------------------------------------------------
             # Final statistics
             # ----------------------------------------------------------------
-            n_trials = len(accuracies)
-            mean_acc = float(np.mean(accuracies))
-            std_acc = float(np.std(accuracies, ddof=1))
-            effective_half_width = self.confidence_t * std_acc / np.sqrt(n_trials)
+            n_trials = len(masking_ratios)
+            mean_masking = float(np.mean(masking_ratios))
+            std_masking = float(np.std(masking_ratios, ddof=1))
+            mean_critical = float(np.mean(critical_ratios))
+            std_critical = float(np.std(critical_ratios, ddof=1))
+            mean_faulty_acc = float(np.mean(faulty_accuracies))
+            effective_half_width = self.confidence_t * std_masking / np.sqrt(n_trials)
 
             # ----------------------------------------------------------------
             # Sanity checks
@@ -322,10 +441,10 @@ class BERCampaign:
                         f'sigma=0 across all pilot trials. '
                         f'Possible bug in injection pipeline.')
 
-            if not (0.0 <= mean_acc <= 1.0):
+            if not (0.0 <= mean_masking <= 1.0):
                 tqdm.write(f'[WARNING] injection_level={injection_level}: '
-                        f'mean accuracy {mean_acc:.4f} outside [0, 1]. '
-                        f'Possible bug in _plain_accuracy.')
+                        f'mean masking ratio {mean_masking:.4f} outside [0, 1]. '
+                        f'Possible bug in _evaluate_trial.')
 
             # ----------------------------------------------------------------
             # Store results
@@ -334,17 +453,24 @@ class BERCampaign:
                 'sampling_mode': self.sampling_mode,
                 'injection_level': injection_level,
                 'golden_accuracy': golden_accuracy,
-                'mean': mean_acc,
-                'std': std_acc,
+                'mean_masking_ratio': mean_masking,
+                'std_masking_ratio': std_masking,
+                'mean_critical_ratio': mean_critical,
+                'std_critical_ratio': std_critical,
+                'mean_faulty_accuracy': mean_faulty_acc,
                 'n_trials': n_trials,
                 'n_target': n_target,
                 'effective_half_width': effective_half_width,
+                'sigma_masking': sigma_masking,
+                'sigma_accuracy': sigma_accuracy,
+                'sizing_metric': 'masking' if sigma_masking >= sigma_accuracy else 'accuracy',
             }
 
             tqdm.write(f'[BERCampaign] level={injection_level} | '
                     f'trials={n_trials} | '
-                    f'mean={mean_acc:.4f} | '
-                    f'std={std_acc:.4f} | '
+                    f'M={mean_masking:.4f} | '
+                    f'crit={mean_critical:.4f} | '
+                    f'std_M={std_masking:.4f} | '
                     f'half_width={effective_half_width:.4f}')
 
         return self.results
