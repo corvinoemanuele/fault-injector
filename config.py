@@ -1,5 +1,5 @@
 # ===================== RETE E DATASET =====================
-NETWORK_NAME = 'VGG13_BN_SGD_EP_200_LR_01'
+NETWORK_NAME = 'VGG13_BN_SGD_EP_200_LR_04'
 DATASET = 'CIFAR100'
 
 # ===================== PATH =====================
@@ -14,6 +14,13 @@ MAX_FAULTS_TO_INJECT = 20000
 BATCH_SIZE = 256
 DEVICE = 'cuda'
 DELETE_FAULTY_OUTPUT = True #if True it delete the faulty output folder after data analyzer to save space on the disk
+
+# ===================== BER CAMPAIGN =====================
+P_VALUES     = [1e-8, 5e-8, 1e-7, 5e-7, 1e-6]
+PILOT_TRIALS = 20
+MAX_TRIALS   = 100
+PRECISION_E  = 0.01
+CONFIDENCE_T = 2.576
 
 # ===================== OTTIMIZZAZIONI RETE =====================
 # Raramente usati — di solito il modello pruned/TMR viene caricato direttamente tramite NETWORK_NAME

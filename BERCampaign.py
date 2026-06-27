@@ -196,135 +196,158 @@ class BERCampaign:
 
         return correct / total
 
-def run(self) -> dict:
-    """
-    Execute the BER campaign over all injection levels.
+    def run(self) -> dict:
+        """
+        Execute the BER campaign over all injection levels.
 
-    For each injection_level, runs a two-stage Monte Carlo sampling:
-      1) Pilot stage: always runs pilot_trials trials to estimate sigma.
-      2) Extension stage: computes the required number of trials via
-            n = (confidence_t * sigma / precision_e) ** 2
-         then runs the additional trials needed to reach
-            n_target = min(max(n, pilot_trials), max_trials).
+        For each injection_level, runs a two-stage Monte Carlo sampling:
+        1) Pilot stage: always runs pilot_trials trials to estimate sigma.
+        2) Extension stage: computes the required number of trials via
+                n = (confidence_t * sigma / precision_e) ** 2
+            then runs the additional trials needed to reach
+                n_target = min(max(n, pilot_trials), max_trials).
 
-    RNG seeding strategy: each injection_level gets its own independent
-    RNG derived from the base seed plus the level index
-    (np.random.default_rng(self.seed + i), where i is the position of
-    the level in self.injection_levels). This guarantees that results
-    for a given level are fully reproducible regardless of how many
-    trials other levels ran, and that adding or removing levels from
-    the list does not affect the others.
+        RNG seeding strategy: each injection_level gets its own independent
+        RNG derived from the base seed plus the level index
+        (np.random.default_rng(self.seed + i), where i is the position of
+        the level in self.injection_levels). This guarantees that results
+        for a given level are fully reproducible regardless of how many
+        trials other levels ran, and that adding or removing levels from
+        the list does not affect the others.
 
-    Sanity checks (warnings, not errors):
-      - effective half-width > precision_e: sigma was underestimated
-        in the pilot stage, more trials would be needed.
-      - sigma == 0 at a non-zero injection level: suspicious, may
-        indicate a bug in the injection pipeline.
-      - mean accuracy outside [0, 1]: should never happen, signals
-        a bug in _plain_accuracy.
+        Sanity checks (warnings, not errors):
+        - effective half-width > precision_e: sigma was underestimated
+            in the pilot stage, more trials would be needed.
+        - sigma == 0 at a non-zero injection level: suspicious, may
+            indicate a bug in the injection pipeline.
+        - mean accuracy outside [0, 1]: should never happen, signals
+            a bug in _plain_accuracy.
 
-    :return: self.results, a dict keyed by injection_level. Each value
-             is a dict with keys:
-               - 'sampling_mode': str
-               - 'injection_level': the level value (k or p)
-               - 'golden_accuracy': float, accuracy without faults
-               - 'mean': float, mean faulty accuracy across all trials
-               - 'std': float, std of faulty accuracy across all trials
-               - 'n_trials': int, total number of trials actually run
-               - 'n_target': int, number of trials computed from sigma
-               - 'effective_half_width': float, t*std/sqrt(n_trials)
-    """
+        :return: self.results, a dict keyed by injection_level. Each value
+                is a dict with keys:
+                - 'sampling_mode': str
+                - 'injection_level': the level value (k or p)
+                - 'golden_accuracy': float, accuracy without faults
+                - 'mean': float, mean faulty accuracy across all trials
+                - 'std': float, std of faulty accuracy across all trials
+                - 'n_trials': int, total number of trials actually run
+                - 'n_target': int, number of trials computed from sigma
+                - 'effective_half_width': float, t*std/sqrt(n_trials)
+        """
+        from tqdm import tqdm
 
-    self.results = {}
+        self.results = {}
 
-    # Golden accuracy — evaluated once, shared across all levels
-    golden_accuracy = self._plain_accuracy()
+        # Golden accuracy — evaluated once, shared across all levels
+        golden_accuracy = self._plain_accuracy()
+        print(f'Golden accuracy: {golden_accuracy:.4f}\n')
 
-    for i, injection_level in enumerate(self.injection_levels):
+        level_bar = tqdm(
+            enumerate(self.injection_levels),
+            total=len(self.injection_levels),
+            desc='BER Campaign',
+            position=0,
+        )
 
-        # Independent RNG for this level: adding/removing other levels
-        # does not affect reproducibility of this one
-        rng = np.random.default_rng(self.seed + i)
+        for i, injection_level in level_bar:
+            level_bar.set_description(f'BER Campaign | level={injection_level}')
 
-        # ----------------------------------------------------------------
-        # Stage 1 — pilot trials
-        # ----------------------------------------------------------------
-        accuracies = []
-        for _ in range(self.pilot_trials):
-            faults = self._sample_faults(injection_level, rng)
-            self.injector.inject_multi_bit_flip(faults)
-            acc = self._plain_accuracy()
-            self.injector.restore_golden_multi()
-            accuracies.append(acc)
+            rng = np.random.default_rng(self.seed + i)
 
-        sigma = float(np.std(accuracies, ddof=1))
+            # ----------------------------------------------------------------
+            # Stage 1 — pilot trials
+            # ----------------------------------------------------------------
+            accuracies = []
+            pilot_bar = tqdm(
+                range(self.pilot_trials),
+                desc=f'  Pilot (level={injection_level})',
+                position=1,
+                leave=False,
+            )
+            for _ in pilot_bar:
+                faults = self._sample_faults(injection_level, rng)
+                self.injector.inject_multi_bit_flip(faults)
+                acc = self._plain_accuracy()
+                self.injector.restore_golden_multi()
+                accuracies.append(acc)
+                pilot_bar.set_postfix(acc=f'{acc:.4f}')
 
-        # ----------------------------------------------------------------
-        # Stage 2 — compute n_target and run extra trials if needed
-        # ----------------------------------------------------------------
-        if sigma == 0:
-            n_computed = self.pilot_trials
-        else:
-            n_computed = (self.confidence_t * sigma / self.precision_e) ** 2
+            sigma = float(np.std(accuracies, ddof=1))
 
-        n_target = int(min(max(n_computed, self.pilot_trials), self.max_trials))
-        n_extra = n_target - self.pilot_trials
+            # ----------------------------------------------------------------
+            # Stage 2 — compute n_target and run extra trials if needed
+            # ----------------------------------------------------------------
+            if sigma == 0:
+                n_computed = self.pilot_trials
+            else:
+                n_computed = (self.confidence_t * sigma / self.precision_e) ** 2
 
-        for _ in range(n_extra):
-            faults = self._sample_faults(injection_level, rng)
-            self.injector.inject_multi_bit_flip(faults)
-            acc = self._plain_accuracy()
-            self.injector.restore_golden_multi()
-            accuracies.append(acc)
+            n_target = int(min(max(n_computed, self.pilot_trials), self.max_trials))
+            n_extra = n_target - self.pilot_trials
 
-        # ----------------------------------------------------------------
-        # Final statistics
-        # ----------------------------------------------------------------
-        n_trials = len(accuracies)
-        mean_acc = float(np.mean(accuracies))
-        std_acc = float(np.std(accuracies, ddof=1))
-        effective_half_width = self.confidence_t * std_acc / np.sqrt(n_trials)
+            if n_extra > 0:
+                extra_bar = tqdm(
+                    range(n_extra),
+                    desc=f'  Extra  (level={injection_level})',
+                    position=1,
+                    leave=False,
+                )
+                for _ in extra_bar:
+                    faults = self._sample_faults(injection_level, rng)
+                    self.injector.inject_multi_bit_flip(faults)
+                    acc = self._plain_accuracy()
+                    self.injector.restore_golden_multi()
+                    accuracies.append(acc)
+                    extra_bar.set_postfix(acc=f'{acc:.4f}')
 
-        # ----------------------------------------------------------------
-        # Sanity checks
-        # ----------------------------------------------------------------
-        if effective_half_width > self.precision_e:
-            print(f"[WARNING] injection_level={injection_level}: "
-                  f"effective half-width {effective_half_width:.4f} > "
-                  f"precision_e {self.precision_e:.4f}. "
-                  f"Consider increasing max_trials.")
+            # ----------------------------------------------------------------
+            # Final statistics
+            # ----------------------------------------------------------------
+            n_trials = len(accuracies)
+            mean_acc = float(np.mean(accuracies))
+            std_acc = float(np.std(accuracies, ddof=1))
+            effective_half_width = self.confidence_t * std_acc / np.sqrt(n_trials)
 
-        if sigma == 0 and injection_level != 0:
-            print(f"[WARNING] injection_level={injection_level}: "
-                  f"sigma=0 across all pilot trials. "
-                  f"Possible bug in injection pipeline.")
+            # ----------------------------------------------------------------
+            # Sanity checks
+            # ----------------------------------------------------------------
+            if effective_half_width > self.precision_e:
+                tqdm.write(f'[WARNING] injection_level={injection_level}: '
+                        f'effective half-width {effective_half_width:.4f} > '
+                        f'precision_e {self.precision_e:.4f}. '
+                        f'Consider increasing max_trials.')
 
-        if not (0.0 <= mean_acc <= 1.0):
-            print(f"[WARNING] injection_level={injection_level}: "
-                  f"mean accuracy {mean_acc:.4f} outside [0, 1]. "
-                  f"Possible bug in _plain_accuracy.")
+            if sigma == 0 and injection_level != 0:
+                tqdm.write(f'[WARNING] injection_level={injection_level}: '
+                        f'sigma=0 across all pilot trials. '
+                        f'Possible bug in injection pipeline.')
 
-        # ----------------------------------------------------------------
-        # Store results
-        # ----------------------------------------------------------------
-        self.results[injection_level] = {
-            'sampling_mode':      self.sampling_mode,
-            'injection_level':    injection_level,
-            'golden_accuracy':    golden_accuracy,
-            'mean':               mean_acc,
-            'std':                std_acc,
-            'n_trials':           n_trials,
-            'n_target':           n_target,
-            'effective_half_width': effective_half_width,
-        }
+            if not (0.0 <= mean_acc <= 1.0):
+                tqdm.write(f'[WARNING] injection_level={injection_level}: '
+                        f'mean accuracy {mean_acc:.4f} outside [0, 1]. '
+                        f'Possible bug in _plain_accuracy.')
 
-        print(f"[BERCampaign] level={injection_level} | "
-              f"trials={n_trials} | "
-              f"mean={mean_acc:.4f} | "
-              f"std={std_acc:.4f} | "
-              f"half_width={effective_half_width:.4f}")
+            # ----------------------------------------------------------------
+            # Store results
+            # ----------------------------------------------------------------
+            self.results[injection_level] = {
+                'sampling_mode': self.sampling_mode,
+                'injection_level': injection_level,
+                'golden_accuracy': golden_accuracy,
+                'mean': mean_acc,
+                'std': std_acc,
+                'n_trials': n_trials,
+                'n_target': n_target,
+                'effective_half_width': effective_half_width,
+            }
 
-    return self.results
+            tqdm.write(f'[BERCampaign] level={injection_level} | '
+                    f'trials={n_trials} | '
+                    f'mean={mean_acc:.4f} | '
+                    f'std={std_acc:.4f} | '
+                    f'half_width={effective_half_width:.4f}')
+
+        return self.results
 
 
                  
